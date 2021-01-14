@@ -9,8 +9,9 @@
 using namespace std;
 
 multithread* init_multithread(int, int, int, int);
-void init_regs(multithread);
-void init_threads(multithread);
+void init_regs(multithread*);
+void init_threads(multithread*);
+void execute_command(multithread*, Instruction, int);
 
 class inst_properties {
 public:
@@ -52,31 +53,28 @@ void CORE_BlockedMT() {
 
 			if (lu_thread == tid) {
 				if ((MT_block->vec_threads_[tid][0]->inst_.opcode < CMD_LOAD)){
-					execute_command(MT_block->vec_threads_[tid][0]->inst_, tid); // TODO : implement func
-					MT_block->cyc_count_++;
-					decrease_thread_cycels(MT_block); // TODO : implement func
+					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid); // TODO : implement func
+					decrease_thread_cycels(MT_block, tid); // TODO : implement func
 					break;
 				}
 				else if (is_halt) {
 					MT_block->is_thread_valid[tid] = true; // if thread[i] is valid then the thread is finished
-					MT_block->cyc_count_++;
 					MT_block->cyc_count_ += MT_block->overhead;
 					MT_block->halts_num++;
+					decrease_thread_cycels(MT_block, tid);
 					lu_thread = find_next_thread(MT_block); // TODO : implement func
-					decrease_thread_cycels(MT_block);
+					
 					break;
 				}
 				else {// store \ load command
-					MT_block->cyc_count_++;
 					MT_block->is_thread_valid[tid] = true;
+					decrease_thread_cycels(MT_block, tid);
 					int tmp_lu = find_next_thread(MT_block);
-					execute_command(MT_block->vec_threads_[tid][0]->inst_, tid);
+					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid);
 					if (tmp_lu != lu_thread) {
 						MT_block->cyc_count_ += MT_block->overhead;
 						lu_thread = tmp_lu;
 					}
-
-					decrease_thread_cycels(MT_block);
 				}
 			}
 
@@ -86,6 +84,30 @@ void CORE_BlockedMT() {
 }
 
 void CORE_FinegrainedMT() {
+
+	multithread* MT_FG = init_multithread(SIM_GetSwitchCycles(), SIM_GetThreadsNum(),
+		SIM_GetLoadLat(), SIM_GetStoreLat());
+	if (!MT_FG)
+		return;
+	if (MT_FG->thread_num_ == 0)
+		return;
+
+	while (MT_FG->halts_num < MT_FG->thread_num_) {
+
+
+		for (int tid = 0; tid < MT_FG->thread_num_; tid++) {
+			bool is_halt = (MT_FG->vec_threads_[tid][0]->inst_.opcode == CMD_HALT) ? true : false;
+
+			if (!is_halt && !(MT_FG->is_thread_valid[tid]) ) 
+				execute_command(MT_FG, MT_FG->vec_threads_[tid][0]->inst_, tid);
+
+			MT_FG->is_thread_valid[tid] = true;
+			decrease_thread_cycels(MT_FG, tid);
+			tid = find_next_thread(MT_FG);
+			tid--;
+		}
+	}
+
 }
 
 double CORE_BlockedMT_CPI() {
@@ -159,5 +181,38 @@ void init_threads(multithread* mt) {
 			line++;
 		}
 
+	}
+}
+
+void execute_command(multithread* mt, Instruction inst, int tid) {
+	
+	switch (inst.opcode){
+		     case CMD_NOP: // NOP
+				 break;
+			 case CMD_ADDI:
+				 mt->vec_regs_[tid]->reg[inst.dst_index] = mt->vec_regs_[tid]->reg[inst.src1_index] + inst.src2_index_imm;
+				 break;
+			 case CMD_SUBI:
+				 mt->vec_regs_[tid]->reg[inst.dst_index] = mt->vec_regs_[tid]->reg[inst.src1_index] - inst.src2_index_imm;
+				 break;
+			 case CMD_ADD:
+				 mt->vec_regs_[tid]->reg[inst.dst_index] = mt->vec_regs_[tid]->reg[inst.src1_index] +
+																		 mt->vec_regs_[tid]->reg[inst.src2_index_imm];
+				 break;
+			 case CMD_SUB:
+				 mt->vec_regs_[tid]->reg[inst.dst_index] = mt->vec_regs_[tid]->reg[inst.src1_index] -
+																		 mt->vec_regs_[tid]->reg[inst.src2_index_imm];
+				 break;
+			 case CMD_LOAD:
+
+				 SIM_MemDataRead(mt->vec_regs_[tid]->reg[inst.src1_index] + mt->vec_regs_[tid]->reg[inst.src2_index_imm],
+																		 &mt->vec_regs_[tid]->reg[inst.dst_index]);
+				 break;
+			 case CMD_STORE:
+				 SIM_MemDataWrite(mt->vec_regs_[tid]->reg[inst.src1_index] + mt->vec_regs_[tid]->reg[inst.src2_index_imm],
+																		 mt->vec_regs_[tid]->reg[inst.dst_index]);
+				 break;
+			 case CMD_HALT:
+				 break;
 	}
 }
