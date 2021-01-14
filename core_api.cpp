@@ -12,6 +12,7 @@ multithread* init_multithread(int, int, int, int);
 void init_regs(multithread*);
 void init_threads(multithread*);
 void execute_command(multithread*, Instruction, int);
+void decrease_thread_cycels(multithread*, int);
 
 class inst_properties {
 public:
@@ -215,4 +216,28 @@ void execute_command(multithread* mt, Instruction inst, int tid) {
 			 case CMD_HALT:
 				 break;
 	}
+}
+
+void decrease_thread_cycels(multithread* mt, int tid) {
+
+	int min_cnt = INT_MAX;
+	
+	for (int i = 0; i < mt->thread_num_; i++) {
+		bool is_halt = (mt->vec_threads_[i][0]->inst_.opcode == CMD_HALT);
+		if (mt->is_thread_valid[i] && !is_halt)
+			min_cnt = (mt->vec_threads_[i][0]->count_ < min_cnt) ? mt->vec_threads_[i][0]->count_ : min_cnt;
+	}
+
+	for (int i = 0; i < mt->thread_num_; i++) {
+		bool is_halt = (mt->vec_threads_[i][0]->inst_.opcode == CMD_HALT);
+		if (mt->is_thread_valid[i] && !is_halt) {
+			mt->vec_threads_[i][0]->count_ -= min_cnt;
+			if ((mt->vec_threads_[i][0]->count_ == 0))
+				delete mt->vec_threads_[i][0];
+				mt->vec_threads_[i].erase(mt->vec_threads_[i].begin());
+		}
+	}
+
+	mt->cyc_count_ += min_cnt;
+
 }
