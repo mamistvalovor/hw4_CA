@@ -13,6 +13,8 @@ void init_regs(multithread*);
 void init_threads(multithread*);
 void execute_command(multithread*, Instruction, int);
 void decrease_thread_cycels(multithread*, int);
+int find_next_thread(multithread*, int);
+void free_mt(multithread*);
 
 class inst_properties {
 public:
@@ -29,15 +31,20 @@ public:
 	int store_latency = 0;
 	int load_latency = 0;
 
+	double Inst_num_ = 0;
 	int cyc_count_ = 0;
 	bool *is_thread_valid;
 	vector< vector< inst_properties* > > vec_threads_;
 	vector<tcontext*> vec_regs_;
 };
 
+
+multithread* MT_block;
+multithread* MT_FG;
+
 void CORE_BlockedMT() {
 
-	multithread* MT_block = init_multithread(SIM_GetSwitchCycles(), SIM_GetThreadsNum(),
+	MT_block = init_multithread(SIM_GetSwitchCycles(), SIM_GetThreadsNum(),
 													SIM_GetLoadLat(), SIM_GetStoreLat());
 	if (!MT_block)
 		return;
@@ -63,14 +70,14 @@ void CORE_BlockedMT() {
 					MT_block->cyc_count_ += MT_block->overhead;
 					MT_block->halts_num++;
 					decrease_thread_cycels(MT_block, tid);
-					lu_thread = find_next_thread(MT_block); // TODO : implement func
+					lu_thread = find_next_thread(MT_block, tid); // TODO : implement func
 					
 					break;
 				}
 				else {// store \ load command
 					MT_block->is_thread_valid[tid] = true;
 					decrease_thread_cycels(MT_block, tid);
-					int tmp_lu = find_next_thread(MT_block);
+					int tmp_lu = find_next_thread(MT_block, tid);
 					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid);
 					if (tmp_lu != lu_thread) {
 						MT_block->cyc_count_ += MT_block->overhead;
@@ -86,46 +93,53 @@ void CORE_BlockedMT() {
 
 void CORE_FinegrainedMT() {
 
-	multithread* MT_FG = init_multithread(SIM_GetSwitchCycles(), SIM_GetThreadsNum(),
+	MT_FG = init_multithread(SIM_GetSwitchCycles(), SIM_GetThreadsNum(),
 		SIM_GetLoadLat(), SIM_GetStoreLat());
 	if (!MT_FG)
 		return;
 	if (MT_FG->thread_num_ == 0)
 		return;
 
-	while (MT_FG->halts_num < MT_FG->thread_num_) {
 
+	for (int tid = 0; tid < MT_FG->thread_num_; tid++) {
+		bool is_halt = (MT_FG->vec_threads_[tid][0]->inst_.opcode == CMD_HALT) ? true : false;
 
-		for (int tid = 0; tid < MT_FG->thread_num_; tid++) {
-			bool is_halt = (MT_FG->vec_threads_[tid][0]->inst_.opcode == CMD_HALT) ? true : false;
+		if (!is_halt && !(MT_FG->is_thread_valid[tid]))
+			execute_command(MT_FG, MT_FG->vec_threads_[tid][0]->inst_, tid);
 
-			if (!is_halt && !(MT_FG->is_thread_valid[tid]) ) 
-				execute_command(MT_FG, MT_FG->vec_threads_[tid][0]->inst_, tid);
+		if (is_halt)
+			MT_FG->halts_num++;
 
-			MT_FG->is_thread_valid[tid] = true;
-			decrease_thread_cycels(MT_FG, tid);
-			tid = find_next_thread(MT_FG);
-			tid--;
-		}
+		MT_FG->is_thread_valid[tid] = true;
+		decrease_thread_cycels(MT_FG, tid);
+		tid = find_next_thread(MT_FG, tid);
+		tid--;
+
+		if (MT_FG->halts_num == MT_FG->thread_num_)
+			break;
 	}
 
 }
 
 double CORE_BlockedMT_CPI() {
-	return 0;
+	double mt_B_CPI = MT_block->cyc_count_ / MT_block->Inst_num_;
+	free_mt(MT_block);
+	return mt_B_CPI;
 }
 
 double CORE_FinegrainedMT_CPI() {
-	return 0;
+	double mt_FG_CPI = MT_FG->cyc_count_ / MT_FG->Inst_num_;
+	free_mt(MT_FG);
+	return mt_FG_CPI;
 }
 
 void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
+	context = MT_block->vec_regs_[threadid];
 }
 
 void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) {
+	context = MT_FG->vec_regs_[threadid];
 }
-
-
 
 multithread* init_multithread(int switch_cyc, int th_num, int load_cyc, int store_cyc) {
 	
@@ -142,6 +156,9 @@ multithread* init_multithread(int switch_cyc, int th_num, int load_cyc, int stor
 
 	init_regs(MT);
 	init_threads(MT);
+
+	for (int i = 0; i < MT->thread_num_; i++)
+		MT->Inst_num_ += MT->vec_threads_[i].size();
 
 	return MT;
 }
@@ -239,5 +256,30 @@ void decrease_thread_cycels(multithread* mt, int tid) {
 	}
 
 	mt->cyc_count_ += min_cnt;
+
+}
+
+int find_next_thread(multithread* mt, int tid) {
+
+	for (int i = tid + 1; i < mt->thread_num_; i = ++i % mt->thread_num_) {
+		if (!mt->is_thread_valid[i])
+			return i;
+
+		if (i == tid)
+			break;
+	}
+	return tid;
+
+}
+
+void free_mt(multithread* mt) {
+
+	for (int i = 0; i < mt->thread_num_; i++) {
+
+		delete *mt->vec_threads_[i].begin(); // deletes ramining HALTS
+		delete mt->vec_regs_[i]; // deletes register files (*tcontext)
+	}
+
+	delete mt;
 
 }
