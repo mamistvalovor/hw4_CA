@@ -1,6 +1,6 @@
 /* 046267 Computer Architecture - Spring 2020 - HW #4 */
 /* Main memory simulator implementation               */
-
+#define _CRT_SECURE_NO_WARNINGS
 #include "core_api.h"
 #include <stddef.h>
 #include <stdint.h>

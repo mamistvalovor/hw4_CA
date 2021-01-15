@@ -138,13 +138,16 @@ double CORE_FinegrainedMT_CPI() {
 void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
 	if ( (!context) || (threadid < 0) || (threadid >= MT_block->thread_num_))
 		return;
-	context = MT_block->vec_regs_[threadid];
+	for(int i = 0; i < REGS_COUNT; i++)
+		context[threadid].reg[i] = MT_block->vec_regs_[threadid]->reg[i];
 }
 
 void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) {
 	if ( (!context) || (threadid < 0) || (threadid >= MT_FG->thread_num_))
 		return;
-	context = MT_FG->vec_regs_[threadid];
+	for (int i = 0; i < REGS_COUNT; i++)
+		context[threadid].reg[i] = MT_FG->vec_regs_[threadid]->reg[i];
+
 }
 
 multithread* init_multithread(int switch_cyc, int th_num, int load_cyc, int store_cyc) {
@@ -276,7 +279,7 @@ void decrease_thread_cycels(multithread* mt, int tid) {
 		}
 	}
 
-	if (proccess_cmd_num == mt->thread_num_) 
+	if (proccess_cmd_num == mt->thread_num_) // check is needed!
 		mt->cyc_count_ += min_cnt + 1;
 	else
 		mt->cyc_count_++;
