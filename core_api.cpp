@@ -1,5 +1,5 @@
 /* 046267 Computer Architecture - Spring 2020 - HW #4 */
-
+#define _CRT_SECURE_NO_WARNINGS
 #include "core_api.h"
 #include "sim_api.h"
 
@@ -7,14 +7,6 @@
 #include <stdio.h>
 
 using namespace std;
-
-multithread* init_multithread(int, int, int, int);
-void init_regs(multithread*);
-void init_threads(multithread*);
-void execute_command(multithread*, Instruction, int);
-void decrease_thread_cycels(multithread*, int);
-int find_next_thread(multithread*, int);
-void free_mt(multithread*);
 
 class inst_properties {
 public:
@@ -24,7 +16,7 @@ public:
 
 class multithread {
 public:
-	int overhead = 0;
+	int overhead = -1;
 	int thread_num_ = 0;
 	int halts_num = 0;
 
@@ -33,10 +25,18 @@ public:
 
 	double Inst_num_ = 0;
 	int cyc_count_ = 0;
-	bool *is_thread_valid;
+	vector<bool> is_thread_valid;
 	vector< vector< inst_properties* > > vec_threads_;
 	vector<tcontext*> vec_regs_;
 };
+
+multithread* init_multithread(int, int, int, int);
+void init_regs(multithread*);
+void init_threads(multithread*);
+void execute_command(multithread*, Instruction, int);
+void decrease_thread_cycels(multithread*, int);
+int find_next_thread(multithread*, int, bool);
+void free_mt(multithread*);
 
 
 multithread* MT_block;
@@ -61,24 +61,26 @@ void CORE_BlockedMT() {
 
 			if (lu_thread == tid) {
 				if ((MT_block->vec_threads_[tid][0]->inst_.opcode < CMD_LOAD)){
-					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid); // TODO : implement func
-					decrease_thread_cycels(MT_block, tid); // TODO : implement func
+					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid); 
+					MT_block->is_thread_valid[tid] = true;
+					decrease_thread_cycels(MT_block, tid);
 					break;
 				}
 				else if (is_halt) {
 					MT_block->is_thread_valid[tid] = true; // if thread[i] is valid then the thread is finished
-					MT_block->cyc_count_ += MT_block->overhead;
+					if(MT_block->halts_num < MT_block->thread_num_ - 1)
+						MT_block->cyc_count_ += MT_block->overhead;
 					MT_block->halts_num++;
 					decrease_thread_cycels(MT_block, tid);
-					lu_thread = find_next_thread(MT_block, tid); // TODO : implement func
+					lu_thread = find_next_thread(MT_block, tid, true);
 					
 					break;
 				}
 				else {// store \ load command
 					MT_block->is_thread_valid[tid] = true;
-					decrease_thread_cycels(MT_block, tid);
-					int tmp_lu = find_next_thread(MT_block, tid);
 					execute_command(MT_block, MT_block->vec_threads_[tid][0]->inst_, tid);
+					decrease_thread_cycels(MT_block, tid);
+					int tmp_lu = find_next_thread(MT_block, tid, true);
 					if (tmp_lu != lu_thread) {
 						MT_block->cyc_count_ += MT_block->overhead;
 						lu_thread = tmp_lu;
@@ -112,7 +114,7 @@ void CORE_FinegrainedMT() {
 
 		MT_FG->is_thread_valid[tid] = true;
 		decrease_thread_cycels(MT_FG, tid);
-		tid = find_next_thread(MT_FG, tid);
+		tid = find_next_thread(MT_FG, tid, false);
 		tid--;
 
 		if (MT_FG->halts_num == MT_FG->thread_num_)
@@ -134,10 +136,14 @@ double CORE_FinegrainedMT_CPI() {
 }
 
 void CORE_BlockedMT_CTX(tcontext* context, int threadid) {
+	if ( (!context) || (threadid < 0) || (threadid >= MT_block->thread_num_))
+		return;
 	context = MT_block->vec_regs_[threadid];
 }
 
 void CORE_FinegrainedMT_CTX(tcontext* context, int threadid) {
+	if ( (!context) || (threadid < 0) || (threadid >= MT_FG->thread_num_))
+		return;
 	context = MT_FG->vec_regs_[threadid];
 }
 
@@ -150,9 +156,9 @@ multithread* init_multithread(int switch_cyc, int th_num, int load_cyc, int stor
 	MT->store_latency = store_cyc;
 	MT->load_latency = load_cyc;
 
-	MT->is_thread_valid = new bool[th_num];
+
 	for (int i = 0; i < MT->thread_num_; i++)
-		MT->is_thread_valid[i] = false;
+		MT->is_thread_valid.push_back(false);
 
 	init_regs(MT);
 	init_threads(MT);
@@ -187,13 +193,13 @@ void init_threads(multithread* mt) {
 
 		while (1) {
 			inst_properties* tmp_inst = new inst_properties;
-			tmp_inst->count_ = (tmp_inst->inst_.opcode < CMD_LOAD) ? 1 :
+			SIM_MemInstRead(line, &(tmp_inst->inst_), i);
+			tmp_inst->count_ = ( (tmp_inst->inst_.opcode < CMD_LOAD) || (tmp_inst->inst_.opcode == CMD_HALT) ) ? 1 :
 												(tmp_inst->inst_.opcode == CMD_LOAD) ? mt->load_latency
 																					  : mt->store_latency;
-			SIM_MemInstRead(line, &(tmp_inst->inst_), i);
+			
 			mt->vec_threads_[i].push_back(tmp_inst);
 			if (tmp_inst->inst_.opcode == CMD_HALT) {
-				mt->vec_threads_[i].erase(mt->vec_threads_[i].begin()); // erases dump inst
 				break;
 			}
 			line++;
@@ -223,11 +229,11 @@ void execute_command(multithread* mt, Instruction inst, int tid) {
 				 break;
 			 case CMD_LOAD:
 
-				 SIM_MemDataRead(mt->vec_regs_[tid]->reg[inst.src1_index] + mt->vec_regs_[tid]->reg[inst.src2_index_imm],
+				 SIM_MemDataRead(mt->vec_regs_[tid]->reg[inst.src1_index] + inst.src2_index_imm,
 																		 &mt->vec_regs_[tid]->reg[inst.dst_index]);
 				 break;
 			 case CMD_STORE:
-				 SIM_MemDataWrite(mt->vec_regs_[tid]->reg[inst.src1_index] + mt->vec_regs_[tid]->reg[inst.src2_index_imm],
+				 SIM_MemDataWrite(mt->vec_regs_[tid]->reg[inst.src1_index] + inst.src2_index_imm,
 																		 mt->vec_regs_[tid]->reg[inst.dst_index]);
 				 break;
 			 case CMD_HALT:
@@ -238,37 +244,56 @@ void execute_command(multithread* mt, Instruction inst, int tid) {
 void decrease_thread_cycels(multithread* mt, int tid) {
 
 	int min_cnt = INT_MAX;
-	
+	int proccess_cmd_num = 0;
 	for (int i = 0; i < mt->thread_num_; i++) {
 		bool is_halt = (mt->vec_threads_[i][0]->inst_.opcode == CMD_HALT);
-		if (mt->is_thread_valid[i] && !is_halt)
-			min_cnt = (mt->vec_threads_[i][0]->count_ < min_cnt) ? mt->vec_threads_[i][0]->count_ : min_cnt;
-	}
-
-	for (int i = 0; i < mt->thread_num_; i++) {
-		bool is_halt = (mt->vec_threads_[i][0]->inst_.opcode == CMD_HALT);
-		if (mt->is_thread_valid[i] && !is_halt) {
-			mt->vec_threads_[i][0]->count_ -= min_cnt;
-			if ((mt->vec_threads_[i][0]->count_ == 0))
-				delete mt->vec_threads_[i][0];
-				mt->vec_threads_[i].erase(mt->vec_threads_[i].begin());
+		if (mt->is_thread_valid[i]) {
+			proccess_cmd_num++;
+			if (!is_halt)
+				min_cnt = (mt->vec_threads_[i][0]->count_ < min_cnt) ? mt->vec_threads_[i][0]->count_ : min_cnt;
 		}
 	}
 
-	mt->cyc_count_ += min_cnt;
+	for (int i = 0; i < mt->thread_num_; i++) {
+		bool is_halt = (mt->vec_threads_[i][0]->inst_.opcode == CMD_HALT);
+		if (!is_halt && (proccess_cmd_num == mt->thread_num_) ) {
+			mt->vec_threads_[i][0]->count_ -= (min_cnt + 1);
+			if (i == tid)
+				mt->vec_threads_[i][0]->count_++;
+			if ((mt->vec_threads_[i][0]->count_ == 0)) {
+				delete mt->vec_threads_[i][0]; // deletes inst_properties class allocation
+				mt->vec_threads_[i].erase(mt->vec_threads_[i].begin()); // deletes first cmd
+				mt->is_thread_valid[i] = false;
+			}
+		}
+		else if (mt->is_thread_valid[i] && !is_halt) {
+			mt->vec_threads_[i][0]->count_--;
+			if ((mt->vec_threads_[i][0]->count_ == 0)) {
+				delete mt->vec_threads_[i][0]; // deletes inst_properties class allocation
+				mt->vec_threads_[i].erase(mt->vec_threads_[i].begin()); // deletes first cmd
+				mt->is_thread_valid[i] = false;
+			}
+		}
+	}
+
+	if (proccess_cmd_num == mt->thread_num_) 
+		mt->cyc_count_ += min_cnt + 1;
+	else
+		mt->cyc_count_++;
+	
 
 }
 
-int find_next_thread(multithread* mt, int tid) {
+int find_next_thread(multithread* mt, int tid, bool is_MT_blocked) {
 
-	for (int i = tid + 1; i < mt->thread_num_; i = ++i % mt->thread_num_) {
+	
+	for (int i = tid + !is_MT_blocked; i < mt->thread_num_; i = ++i % mt->thread_num_) {
 		if (!mt->is_thread_valid[i])
 			return i;
 
-		if (i == tid)
-			break;
+		if (i == tid - is_MT_blocked) 
+			return tid;
 	}
-	return tid;
 
 }
 
