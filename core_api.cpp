@@ -330,7 +330,7 @@ void start_proccess(multithread* mt, int tid, bool is_overhead) {
 	}
 
 	mt->is_thread_valid[tid] = true;
-	if (mt->vec_threads_[tid][0]->count_ == 1 && (mt->vec_threads_[tid][0]->count_ >= CMD_LOAD) )
+	if (mt->vec_threads_[tid][0]->count_ == 1 && (mt->vec_threads_[tid][0]->count_ <= CMD_LOAD) )
 		mt->vec_threads_[tid][0]->count_--;
 
 	if (is_overhead)
