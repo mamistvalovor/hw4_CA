@@ -221,6 +221,7 @@ void init_threads(multithread* mt) {
 
 void execute_command(multithread* mt, Instruction inst, int tid) {
 	
+	int tmp_addr_imm = (inst.isSrc2Imm) ? inst.src2_index_imm : mt->vec_regs_[tid]->reg[inst.src2_index_imm];
 	switch (inst.opcode){
 		     case CMD_NOP: // NOP
 				 break;
@@ -239,14 +240,11 @@ void execute_command(multithread* mt, Instruction inst, int tid) {
 																		 mt->vec_regs_[tid]->reg[inst.src2_index_imm];
 				 break;
 			 case CMD_LOAD:
-								//mt->vec_regs_[tid]->reg[inst.src1_index] +
-				 SIM_MemDataRead((inst.isSrc2Imm) ? inst.src2_index_imm : 
-							 mt->vec_regs_[tid]->reg[inst.src2_index_imm], &mt->vec_regs_[tid]->reg[inst.dst_index]);
+				 SIM_MemDataRead(mt->vec_regs_[tid]->reg[inst.src1_index] + tmp_addr_imm
+															, &mt->vec_regs_[tid]->reg[inst.dst_index]);
 				 break;
 			 case CMD_STORE:
-									//mt->vec_regs_[tid]->reg[inst.src1_index] + (
-				 SIM_MemDataWrite((inst.isSrc2Imm) ? inst.src2_index_imm :
-							 mt->vec_regs_[tid]->reg[inst.src2_index_imm], mt->vec_regs_[tid]->reg[inst.dst_index]);
+				 SIM_MemDataWrite(mt->vec_regs_[tid]->reg[inst.dst_index] + tmp_addr_imm, mt->vec_regs_[tid]->reg[inst.src1_index]);
 				 break;
 			 case CMD_HALT:
 				 break;
